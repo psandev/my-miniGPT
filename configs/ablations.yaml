@@ -1,0 +1,67 @@
+# Ablation experiment matrix for MiniGPT
+# Each group varies one component while keeping others at baseline
+
+groups:
+  # Normalization ablation: compare RMSNorm vs LayerNorm vs DyT
+  norm_ablation:
+    base_preset: small
+    vary:
+      norm_type: [rmsnorm, layernorm, dyt]
+    dataset: tinystories
+    max_steps: 20000
+    tokenizer: meta-llama/Llama-3.2-1B
+
+  # Attention ablation: compare MHA vs GQA vs MLA
+  attention_ablation:
+    base_preset: small
+    vary:
+      attention_type: [mha, gqa, mla]
+    dataset: tinystories
+    max_steps: 20000
+    tokenizer: meta-llama/Llama-3.2-1B
+
+  # FFN ablation: compare SwiGLU vs GELU vs ReLU vs MoE
+  ffn_ablation:
+    base_preset: small
+    vary:
+      ffn_type: [swiglu, gelu, relu, moe]
+    dataset: tinystories
+    max_steps: 20000
+    tokenizer: meta-llama/Llama-3.2-1B
+
+  # Residual ablation: compare Standard vs mHC
+  residual_ablation:
+    base_preset: small
+    vary:
+      residual_type: [standard, mhc]
+    dataset: tinystories
+    max_steps: 20000
+    tokenizer: meta-llama/Llama-3.2-1B
+
+  # Prediction head ablation: compare STP vs MTP
+  prediction_ablation:
+    base_preset: small
+    vary:
+      prediction_type: [stp, mtp]
+    dataset: tinystories
+    max_steps: 20000
+    tokenizer: meta-llama/Llama-3.2-1B
+
+  # Positional encoding ablation
+  pos_encoding_ablation:
+    base_preset: small
+    vary:
+      pos_encoding: [rope, learned, alibi]
+    dataset: tinystories
+    max_steps: 20000
+    tokenizer: meta-llama/Llama-3.2-1B
+
+  # Combined innovations (kitchen sink)
+  combined_ablation:
+    base_preset: small
+    vary:
+      residual_type: [standard, mhc]
+      prediction_type: [stp, mtp]
+    dataset: tinystories
+    max_steps: 20000
+    tokenizer: meta-llama/Llama-3.2-1B
