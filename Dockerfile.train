@@ -1,0 +1,51 @@
+# MiniGPT Training Dockerfile
+# Base: PyTorch with CUDA 12.4 and cuDNN 9
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel
+
+# Prevent interactive prompts during apt-get
+ENV DEBIAN_FRONTEND=noninteractive
+
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    wget \
+    curl \
+    vim \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /workspace/minigpt
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install additional training-specific packages
+RUN pip install --no-cache-dir \
+    torchtitan \
+    flash-attn>=2.5 \
+    wandb \
+    datasets \
+    transformers \
+    tokenizers \
+    trl \
+    lm-eval \
+    safetensors \
+    pyyaml
+
+# Copy project source
+COPY configs/ configs/
+COPY miniGPT/ miniGPT/
+COPY training/ training/
+COPY evaluation/ evaluation/
+COPY automation/ automation/
+COPY scripts/ scripts/
+
+# Set environment variables
+ENV PYTHONPATH=/workspace/minigpt
+ENV PYTHONUNBUFFERED=1
+ENV WANDB_MODE=online
+
+# Default entrypoint: pretraining
+ENTRYPOINT ["python", "training/train.py"]
+CMD ["--preset", "tiny", "--dataset", "tinystories"]

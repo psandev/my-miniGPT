@@ -1,0 +1,25 @@
+# Core
+torch>=2.4
+transformers>=4.40
+datasets>=2.18
+tokenizers>=0.15
+wandb>=0.16
+trl>=0.8
+
+# Evaluation
+lm-eval>=0.4
+google-cloud-aiplatform>=1.50
+
+# Quantization
+autoawq>=0.2
+auto-gptq>=0.7
+llama-cpp-python>=0.2
+
+# Deployment
+vllm>=0.4
+sglang>=0.1
+gradio>=4.0
+
+# Testing
+pytest>=8.0
+pytest-xdist>=3.5

@@ -1,0 +1,34 @@
+# MiniGPT Serving Dockerfile
+# Supports vLLM and SGLang serving backends
+FROM vllm/vllm-openai:latest
+
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace/minigpt
+
+# Install serving dependencies
+RUN pip install --no-cache-dir \
+    autoawq \
+    safetensors \
+    pyyaml
+
+# Copy serving scripts and deployment code
+COPY deployment/ deployment/
+COPY quantization/ quantization/
+COPY configs/ configs/
+COPY miniGPT/ miniGPT/
+
+# Environment
+ENV PYTHONPATH=/workspace/minigpt
+ENV PYTHONUNBUFFERED=1
+
+# Expose default ports
+EXPOSE 8000 8080
+
+# Default: vLLM server
+# Override with: docker run minigpt-serve python deployment/serve_sglang.py ...
+ENTRYPOINT ["python", "deployment/serve_vllm.py"]
+CMD ["--model", "/models/minigpt-awq", "--host", "0.0.0.0", "--port", "8000"]

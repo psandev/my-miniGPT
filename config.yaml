@@ -1,0 +1,328 @@
+# =============================================================================
+# MiniGPT — Central Configuration
+# =============================================================================
+# Loaded by every script via OmegaConf:
+#   from omegaconf import OmegaConf
+#   cfg = OmegaConf.load("config.yaml")
+#
+# All scripts run without CLI arguments — they read their section directly.
+# CLI arguments (where kept) override these values when provided.
+#
+# The only section that typically changes between machines is `paths`.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# PATHS
+# Environment-specific directories. Adjust these for your machine.
+# On Windows use forward slashes: C:/Users/peter/trd/miniGPT/data
+# -----------------------------------------------------------------------------
+paths:
+  data_dir: /home/access/peter/trd/miniGPT/data          # prepared .bin / .jsonl datasets
+  checkpoints_dir: /home/access/peter/trd/miniGPT/checkpoints  # saved model checkpoints
+  results_dir: /home/access/peter/trd/miniGPT/results    # evaluation outputs
+
+  # Checkpoint inputs for fine-tuning stages.
+  # pretrain_checkpoint is the input to SFT; sft_checkpoint is the input to DPO.
+  pretrain_checkpoint: /home/access/peter/trd/miniGPT/checkpoints/pretrain/tiny/final/checkpoint.pt
+  sft_checkpoint: /home/access/peter/trd/miniGPT/checkpoints/sft/final/checkpoint.pt
+
+  # Exported model paths used by evaluation and deployment scripts.
+  hf_export_dir: /home/access/peter/trd/miniGPT/checkpoints/hf_export
+  gguf_path: /home/access/peter/trd/miniGPT/checkpoints/gguf/model-Q4_K_M.gguf
+  awq_dir: /home/access/peter/trd/miniGPT/checkpoints/awq
+
+
+# -----------------------------------------------------------------------------
+# DATA
+# Controls data/prepare.py — what to download, tokenize, and pack.
+# Run:  python data/prepare.py
+# -----------------------------------------------------------------------------
+data:
+  tokenizer: HuggingFaceTB/cosmo2-tokenizer  # open-access tokenizer, 49K vocab
+  datasets: [tinystories, openwebtext_10k]   # datasets to prepare by default
+  max_tokens: 5000000     # token cap per pretraining dataset (null = no limit)
+  max_samples: null        # sample cap for SFT/DPO datasets (null = no limit)
+  max_seq_len: 2048        # chunk size for .bin pretraining files
+  val_split: 0.005         # fraction of data held out for validation (0.5%)
+  include_large: false     # set true to also prepare C4 / SmolLM (~200+ GB)
+
+
+# -----------------------------------------------------------------------------
+# MODEL ARCHITECTURE
+# Defines the Transformer architecture. All fields map 1-to-1 to ModelConfig.
+#
+# Quick start: set `preset` to one of the named presets and leave the rest.
+# The preset overrides all fields below it at runtime.
+#   tiny   ~10M params — fast iteration, fits on any GPU
+#   small  ~120M params — TinyStories / small-scale research
+#   medium ~370M params — serious experiments, needs ~12 GB VRAM
+#   large  ~1.3B params — production training, needs 40+ GB VRAM
+#
+# Set preset to null to use the individual fields below.
+# -----------------------------------------------------------------------------
+model:
+  preset: tiny       # tiny | small | medium | large | null
+
+  # Core dimensions
+  vocab_size: 49152  # must match the tokenizer's vocab size
+  d_model: 256       # embedding / hidden dimension
+  n_layers: 6        # number of Transformer decoder layers
+  n_heads: 8         # number of attention heads
+  n_kv_heads: null   # null = MHA (n_kv_heads == n_heads); set < n_heads for GQA
+  max_seq_len: 2048  # maximum context length in tokens
+  dropout: 0.0       # dropout probability (0 = disabled, recommended for large models)
+
+  # Component selection (all swappable via config string)
+  attention_type: gqa       # mha | gqa | mla
+  pos_encoding: rope        # rope | learned | alibi | none
+  norm_type: rmsnorm        # rmsnorm | layernorm | dyt (DynamicTanh, CVPR 2025)
+  ffn_type: swiglu          # swiglu | gelu | relu | moe
+  residual_type: standard   # standard | mhc (Manifold Hyper-Connection)
+  prediction_type: stp      # stp (single token) | mtp (multi-token prediction)
+  use_bias: false           # whether to add bias terms in Linear layers
+
+  # RoPE positional encoding
+  rope_base: 10000.0    # base frequency for RoPE (10000 = original, 500000 = LLaMA-3)
+  rope_scaling: null    # optional scale factor for extended context (null = disabled)
+
+  # Normalization
+  norm_eps: 1.0e-6      # epsilon for numerical stability in RMSNorm / LayerNorm
+  dyt_alpha_init: 0.5   # initial alpha for DynamicTanh (norm_type: dyt only)
+
+  # FFN size
+  ffn_multiplier: 2.667  # d_ff = round(d_model * ffn_multiplier * 2/3) * 3/2 (SwiGLU)
+
+  # Mixture of Experts (ffn_type: moe only)
+  moe_num_experts: 8        # total number of expert FFNs
+  moe_top_k: 2             # experts activated per token
+  moe_aux_loss_weight: 0.01 # load-balancing auxiliary loss weight
+
+  # Manifold Hyper-Connection residual (residual_type: mhc only)
+  mhc_n_streams: 4       # number of parallel residual streams
+  mhc_sinkhorn_iters: 5  # Sinkhorn-Knopp iterations for Birkhoff projection
+
+  # Multi-Token Prediction head (prediction_type: mtp only)
+  mtp_n_heads: 4        # number of future-token prediction heads
+  mtp_loss_weight: 1.0  # weight of auxiliary MTP loss
+
+  # Multi-head Latent Attention (attention_type: mla only)
+  mla_kv_lora_rank: 512    # rank of the low-rank KV projection
+  mla_q_lora_rank: 1536    # rank of the low-rank Q projection
+  mla_rope_head_dim: 64    # per-head dimension for the decoupled RoPE component
+
+
+# -----------------------------------------------------------------------------
+# PRETRAINING
+# Controls training/train.py.
+# Run:  python training/train.py
+# -----------------------------------------------------------------------------
+training:
+  dataset: tinystories    # dataset key from data/prepare.py registry
+
+  # Optimiser (AdamW)
+  lr: 3.0e-4           # peak learning rate
+  min_lr: 3.0e-5       # minimum LR at the end of cosine decay (= lr * 0.1)
+  beta1: 0.9           # AdamW β₁ (first moment decay)
+  beta2: 0.95          # AdamW β₂ (second moment decay)
+  weight_decay: 0.1    # L2 regularisation weight
+  grad_clip: 1.0       # maximum gradient norm (0 = disabled)
+
+  # Schedule
+  warmup_steps: 200    # linear LR warmup steps
+  max_steps: 10000     # total training steps
+  scheduler: cosine    # cosine | linear | constant
+
+  # Batching
+  batch_size: 32                    # micro-batch size per GPU
+  gradient_accumulation_steps: 4    # effective batch = batch_size × accum_steps (64×4 = 256 seqs = 524K tokens/step)
+  num_workers: 4                    # DataLoader worker processes
+
+  # Hardware
+  precision: bf16                   # bf16 | fp16 | fp32
+  activation_checkpointing: true    # recompute activations to save VRAM
+  compile: true                     # torch.compile for ~20% throughput boost
+
+  # Logging & checkpointing
+  log_interval: 10        # steps between log lines
+  eval_interval: 500      # steps between validation loss checks
+  save_interval: 1000     # steps between checkpoint saves
+
+  # Early stopping — halt if loss does not improve for this many log_intervals (0 = disabled)
+  # e.g. patience=3 with log_interval=10 means stop after 30 steps with no improvement
+  early_stopping_patience: 100
+
+  # Weights & Biases
+  use_wandb: false         # set true to enable W&B logging
+  wandb_project: minigpt   # W&B project name
+
+  # Resume
+  resume_from: null       # path to checkpoint to resume from (null = start fresh)
+  use_torchtitan: false   # use TorchTitan launcher (FSDP2, distributed)
+
+
+# -----------------------------------------------------------------------------
+# SUPERVISED FINE-TUNING (SFT)
+# Controls training/sft.py. Requires a pretrained checkpoint at
+# paths.pretrain_checkpoint.
+# Run:  python training/sft.py
+# -----------------------------------------------------------------------------
+sft:
+  dataset: alpaca    # sft dataset: alpaca | oasst | oasst2
+
+  # Optimiser — lower LR than pretraining to preserve pretrained knowledge
+  lr: 1.0e-5         # learning rate (much lower than pretraining)
+  weight_decay: 0.01 # lighter regularisation for fine-tuning
+  grad_clip: 1.0     # maximum gradient norm
+  beta1: 0.9
+  beta2: 0.95
+
+  # Schedule
+  warmup_steps: 200  # linear warmup steps
+  max_steps: 5000    # total SFT steps
+
+  # Batching
+  batch_size: 4                    # small batch to fit long sequences
+  gradient_accumulation_steps: 8   # effective batch size = 4 × 4 = 16
+  max_seq_len: 2048                # truncate/pad sequences to this length
+
+  # Logging & checkpointing
+  log_interval: 10
+  save_interval: 500
+
+  # Weights & Biases
+  use_wandb: false
+  wandb_project: minigpt-sft
+
+
+# -----------------------------------------------------------------------------
+# DIRECT PREFERENCE OPTIMISATION (DPO)
+# Controls training/dpo.py. Requires an SFT checkpoint at
+# paths.sft_checkpoint.
+# Run:  python training/dpo.py
+# -----------------------------------------------------------------------------
+dpo:
+  dataset: hh_rlhf   # preference dataset: hh_rlhf
+
+  # DPO-specific
+  beta: 0.1          # KL-divergence penalty coefficient (higher = closer to SFT)
+
+  # Optimiser — very low LR for preference alignment
+  lr: 5.0e-6         # learning rate (lower than SFT)
+  grad_clip: 1.0
+
+  # Schedule
+  warmup_steps: 100
+  max_steps: 2000
+
+  # Batching
+  batch_size: 4
+  gradient_accumulation_steps: 4
+  max_seq_len: 1024  # shorter than SFT; prompt takes half (512 tokens)
+
+  # Data cap (useful for quick experiments)
+  max_samples: null  # limit training pairs (null = use all)
+
+  # Weights & Biases
+  use_wandb: false
+  wandb_project: minigpt-dpo
+
+
+# -----------------------------------------------------------------------------
+# EVALUATION
+# Controls evaluation/benchmarks.py and evaluation/perplexity.py.
+# Run:  python evaluation/benchmarks.py
+#       python evaluation/perplexity.py
+# -----------------------------------------------------------------------------
+eval:
+  # Benchmark suite (lm-evaluation-harness tasks)
+  tasks: [hellaswag, arc_easy, arc_challenge, piqa, winogrande, mmlu]
+  task_fewshot:             # few-shot examples per task (0 = zero-shot)
+    hellaswag: 0
+    arc_easy: 0
+    arc_challenge: 0
+    piqa: 0
+    winogrande: 0
+    mmlu: 5                 # MMLU uses 5-shot by convention
+  batch_size: auto          # "auto" lets the harness pick; or set an integer
+  device: cuda              # cuda | cpu
+  use_vllm: false           # use vLLM backend for faster evaluation
+  limit: null               # cap examples per task for quick debugging (null = all)
+  use_wandb: false          # log results to W&B
+
+  # Perplexity evaluation
+  perplexity_dataset: wikitext2     # wikitext2 | c4
+  perplexity_max_samples: null      # cap documents for speed (null = all)
+
+
+# -----------------------------------------------------------------------------
+# GEMINI JUDGE
+# Controls evaluation/vertex_judge.py — LLM-as-judge evaluation via Gemini.
+#
+# auth_mode: api_key (easiest)
+#   1. Go to https://aistudio.google.com/apikey
+#   2. Create an API key
+#   3. export GEMINI_API_KEY="your-key"  (or fill api_key below)
+#
+# auth_mode: vertex_ai (requires GCP project with Gemini in Model Garden)
+#   1. gcloud auth application-default login
+#   2. Enable Gemini at https://console.cloud.google.com/vertex-ai/model-garden
+# -----------------------------------------------------------------------------
+judge:
+  auth_mode: api_key        # api_key | vertex_ai
+  api_key: ""               # leave blank to use GEMINI_API_KEY env var
+  project_id: lsports-gen-ai  # GCP project (vertex_ai mode only)
+  location: us-central1       # GCP region  (vertex_ai mode only)
+
+  judge_model: gemini-2.0-flash  # Gemini model to use as judge
+  num_samples: 100          # number of model responses to evaluate
+  position_flip: true       # flip A/B order in half of pairwise comparisons
+  temperature: 0.0          # 0 = deterministic judge outputs
+
+  # Pointwise metrics — each scored 1–5
+  pointwise_metrics: [coherence, helpfulness, fluency, safety]
+
+  # TinyStories-specific rubric (used when evaluating story generation quality)
+  tinystories_rubric:
+    grammar: "Rate grammatical correctness 1-5. 5=perfect, 1=many errors."
+    creativity: "Rate creativity and engagement 1-5. 5=highly original, 1=generic."
+    consistency: "Rate logical consistency 1-5. 5=no contradictions, 1=many."
+    plot_coherence: "Rate plot structure 1-5. 5=clear beginning/middle/end, 1=none."
+
+
+# -----------------------------------------------------------------------------
+# DEPLOYMENT
+# Controls deployment/serve_vllm.py, serve_sglang.py, serve_llamacpp.py.
+# Run:  python deployment/serve_vllm.py
+#       python deployment/serve_sglang.py
+#       python deployment/serve_llamacpp.py
+# -----------------------------------------------------------------------------
+deploy:
+  backend: vllm   # vllm | sglang | llamacpp (serve_llamacpp.py ignores this)
+  host: 0.0.0.0   # bind address (0.0.0.0 = all interfaces)
+  port: 8000      # server port (llamacpp defaults to 8080)
+
+  # GPU memory
+  gpu_memory_utilization: 0.85  # fraction of GPU VRAM to allocate (0–1)
+  tensor_parallel_size: 1       # number of GPUs for tensor parallelism
+
+  # Context
+  max_model_len: 4096  # maximum sequence length the server accepts
+
+  # Quantization
+  quantization: awq_marlin  # awq_marlin | awq | gptq | null
+  dtype: auto               # auto | bfloat16 | float16 | float32
+
+  # TurboQuant KV-cache compression (experimental, requires custom backend)
+  turboquant_enabled: false  # enable TurboQuant KV quantisation
+  turboquant_bits: 4         # KV cache quantisation bits (4 or 8)
+  turboquant_window: 256     # residual window size (tokens kept at full precision)
+
+  # llama.cpp / Ollama settings
+  n_ctx: 4096                              # context window size
+  n_gpu_layers: -1                         # -1 = offload all layers to GPU
+  model_name: minigpt                      # Ollama model registration name
+  system_prompt: "You are a helpful assistant."  # default system prompt
+
+  # Optional API key for vLLM server authentication (null = no auth)
+  api_key: null
